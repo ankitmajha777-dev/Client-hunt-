@@ -1,0 +1,206 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated workspace user profile with owner-isolated access.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "role": { "type": "string", "enum": ["owner", "member"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "email", "role", "createdAt", "updatedAt"]
+    },
+    "Business": {
+      "title": "Business",
+      "description": "Discovered business record from Google Places API or user entry.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "placeId": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "address": { "type": "string", "maxLength": 400 },
+        "city": { "type": "string", "maxLength": 120 },
+        "country": { "type": "string", "maxLength": 80 },
+        "category": { "type": "string", "maxLength": 120 },
+        "website": { "type": "string", "maxLength": 500 },
+        "googleMapsUri": { "type": "string", "maxLength": 500 },
+        "isDemo": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "placeId", "name", "country", "category", "isDemo", "createdAt", "updatedAt"]
+    },
+    "Lead": {
+      "title": "Lead",
+      "description": "Scored and stage-tracked website development prospect.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "placeId": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "country": { "type": "string", "maxLength": 80 },
+        "city": { "type": "string", "maxLength": 120 },
+        "category": { "type": "string", "maxLength": 120 },
+        "websiteTier": { "type": "string", "enum": ["A", "B", "C", "D", "E"] },
+        "scoreTotal": { "type": "number" },
+        "scoreClassification": { "type": "string", "enum": ["Premium Lead", "High Quality", "Medium", "Reject"] },
+        "stage": {
+          "type": "string",
+          "enum": ["New Lead", "Contacted", "Interested", "Requirements Discussion", "Negotiation", "Ready for Project", "Not Interested"]
+        },
+        "verified": { "type": "boolean" },
+        "optedOut": { "type": "boolean" },
+        "isDemo": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "name", "country", "category", "websiteTier", "scoreTotal", "scoreClassification", "stage", "verified", "optedOut", "isDemo", "createdAt", "updatedAt"]
+    },
+    "WebsiteAudit": {
+      "title": "WebsiteAudit",
+      "description": "Technical and UX website audit report for a business.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "tier": { "type": "string", "enum": ["A", "B", "C", "D", "E"] },
+        "overallQuality": { "type": "number" },
+        "isDemo": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "businessId", "tier", "overallQuality", "isDemo", "createdAt", "updatedAt"]
+    },
+    "OutreachMessage": {
+      "title": "OutreachMessage",
+      "description": "Drafted or sent Gmail outreach record with duplicate and opt-out tracking.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "leadId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "subject": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "body": { "type": "string", "minLength": 1, "maxLength": 10000 },
+        "status": { "type": "string", "enum": ["draft", "sent", "replied", "bounced", "unsubscribed"] },
+        "channel": { "type": "string", "enum": ["gmail", "demo_simulated"] },
+        "isDemo": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "leadId", "businessName", "subject", "body", "status", "channel", "isDemo", "createdAt", "updatedAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Multi-turn sales and negotiation thread for a qualified prospect.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "leadId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "stage": {
+          "type": "string",
+          "enum": ["New Lead", "Contacted", "Interested", "Requirements Discussion", "Negotiation", "Ready for Project", "Not Interested"]
+        },
+        "readinessConfidence": { "type": "number" },
+        "isDemo": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "leadId", "businessName", "stage", "readinessConfidence", "isDemo", "createdAt", "updatedAt"]
+    },
+    "ReadyProject": {
+      "title": "ReadyProject",
+      "description": "Qualified client project handover ready for owner takeover.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "leadId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "conversationId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "clientPhone": { "type": "string", "maxLength": 60 },
+        "status": { "type": "string", "enum": ["pending_takeover", "taken_over"] },
+        "isDemo": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "leadId", "conversationId", "businessName", "status", "isDemo", "createdAt", "updatedAt"]
+    },
+    "AgencySettingsDoc": {
+      "title": "AgencySettingsDoc",
+      "description": "Owner agency configuration, pricing, targets, and opt-out registry.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "businessName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "contactEmail": { "type": "string", "format": "email", "maxLength": 200 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "ownerName", "businessName", "contactEmail", "createdAt", "updatedAt"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Audit log of autonomous discovery, outreach, and handover events.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "enum": ["discovery", "audit", "score", "outreach", "conversation", "handover", "automation", "settings"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "detail": { "type": "string", "maxLength": 2000 },
+        "isDemo": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "type", "title", "detail", "isDemo", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private authenticated user profile documents isolated per user."
+    },
+    "/businesses/{businessId}": {
+      "schema": { "$ref": "#/entities/Business" },
+      "description": "Discovered business records owned by the authenticated user."
+    },
+    "/leads/{leadId}": {
+      "schema": { "$ref": "#/entities/Lead" },
+      "description": "Scored and stage-tracked lead records owned by the authenticated user."
+    },
+    "/website_audits/{auditId}": {
+      "schema": { "$ref": "#/entities/WebsiteAudit" },
+      "description": "Website inspection audit reports linked to leads."
+    },
+    "/outreach_messages/{messageId}": {
+      "schema": { "$ref": "#/entities/OutreachMessage" },
+      "description": "Drafted and sent outreach email records."
+    },
+    "/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "Multi-turn sales and negotiation conversation threads."
+    },
+    "/projects/{projectId}": {
+      "schema": { "$ref": "#/entities/ReadyProject" },
+      "description": "Ready-for-handover website development projects."
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/AgencySettingsDoc" },
+      "description": "Owner agency configuration and pricing guardrails."
+    },
+    "/activity_logs/{logId}": {
+      "schema": { "$ref": "#/entities/ActivityLog" },
+      "description": "Immutable operational audit logs owned by the authenticated user."
+    }
+  }
+}

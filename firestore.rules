@@ -1,0 +1,510 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOwnerUid(uid) {
+      return isVerifiedUser() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'ankitmajha777@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isNonEmptyString(val, maxLen) {
+      return val is string && val.size() >= 1 && val.size() <= maxLen;
+    }
+
+    function isOptionalString(val, maxLen) {
+      return val == null || (val is string && val.size() <= maxLen);
+    }
+
+    // Connection test document (read-only ping)
+    match /test/connection {
+      allow get: if isSignedIn();
+    }
+
+    // 1. users (PII isolated per user)
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'displayName', 'email', 'role', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'email', 'role', 'photoURL', 'createdAt', 'updatedAt'])
+        && data.uid == userId
+        && isValidId(data.uid)
+        && isNonEmptyString(data.displayName, 120)
+        && isNonEmptyString(data.email, 200)
+        && data.role in ['owner', 'member']
+        && (!('photoURL' in data) || isOptionalString(data.photoURL, 600))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwnerUid(userId) || isAdmin());
+      allow list: if false;
+      allow create: if isValidId(userId)
+        && isOwnerUid(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().role == 'member'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isOwnerUid(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().role == existing().role
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoURL', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    // 2. businesses
+    function isValidBusiness(data, businessId) {
+      return data.keys().hasAll(['id', 'ownerId', 'placeId', 'name', 'country', 'category', 'isDemo', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'ownerId', 'placeId', 'name', 'address', 'city', 'country', 'category',
+          'phone', 'email', 'website', 'googleMapsUri', 'rating', 'reviewCount',
+          'businessStatus', 'location', 'isDemo', 'createdAt', 'updatedAt'
+        ])
+        && data.id == businessId
+        && isValidId(data.id)
+        && data.ownerId == request.auth.uid
+        && isNonEmptyString(data.placeId, 200)
+        && isNonEmptyString(data.name, 200)
+        && isNonEmptyString(data.country, 80)
+        && isNonEmptyString(data.category, 120)
+        && (!('address' in data) || isOptionalString(data.address, 400))
+        && (!('city' in data) || isOptionalString(data.city, 120))
+        && (!('phone' in data) || isOptionalString(data.phone, 60))
+        && (!('email' in data) || isOptionalString(data.email, 200))
+        && (!('website' in data) || isOptionalString(data.website, 500))
+        && (!('googleMapsUri' in data) || isOptionalString(data.googleMapsUri, 500))
+        && (!('rating' in data) || data.rating == null || (data.rating is number && data.rating >= 0 && data.rating <= 5))
+        && (!('reviewCount' in data) || data.reviewCount == null || (data.reviewCount is number && data.reviewCount >= 0))
+        && (!('businessStatus' in data) || data.businessStatus in ['OPERATIONAL', 'CLOSED_TEMPORARILY', 'UNKNOWN'])
+        && (!('location' in data) || (data.location is map && data.location.keys().hasOnly(['lat', 'lng']) && data.location.lat is number && data.location.lng is number))
+        && data.isDemo is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /businesses/{businessId} {
+      allow get: if isValidId(businessId) && isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow create: if isValidId(businessId)
+        && isVerifiedUser()
+        && isValidBusiness(incoming(), businessId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(businessId)
+        && isVerifiedUser()
+        && (existing().ownerId == request.auth.uid || isAdmin())
+        && isValidBusiness(incoming(), businessId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'address', 'city', 'phone', 'email', 'website', 'googleMapsUri',
+          'rating', 'reviewCount', 'businessStatus', 'location', 'updatedAt'
+        ]);
+      allow delete: if isValidId(businessId) && isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // 3. leads
+    function isValidLead(data, leadId) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'placeId', 'name', 'address', 'city', 'country', 'category',
+          'googleMapsUri', 'businessStatus', 'location', 'websiteTier', 'score',
+          'stage', 'verified', 'optedOut', 'isDemo', 'discoveredAt', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerId', 'placeId', 'name', 'address', 'city', 'country', 'category',
+          'phone', 'email', 'contactPerson', 'website', 'googleMapsUri', 'rating', 'reviewCount',
+          'businessStatus', 'location', 'websiteTier', 'score', 'stage', 'verified', 'optedOut',
+          'isDemo', 'discoveredAt', 'createdAt', 'updatedAt'
+        ])
+        && data.id == leadId
+        && isValidId(data.id)
+        && data.ownerId == request.auth.uid
+        && isNonEmptyString(data.placeId, 200)
+        && isNonEmptyString(data.name, 200)
+        && isOptionalString(data.address, 400)
+        && isOptionalString(data.city, 120)
+        && isNonEmptyString(data.country, 80)
+        && isNonEmptyString(data.category, 120)
+        && (!('phone' in data) || isOptionalString(data.phone, 60))
+        && (!('email' in data) || isOptionalString(data.email, 200))
+        && (!('contactPerson' in data) || isOptionalString(data.contactPerson, 120))
+        && (!('website' in data) || isOptionalString(data.website, 500))
+        && isOptionalString(data.googleMapsUri, 500)
+        && (!('rating' in data) || data.rating == null || (data.rating is number && data.rating >= 0 && data.rating <= 5))
+        && (!('reviewCount' in data) || data.reviewCount == null || (data.reviewCount is number && data.reviewCount >= 0))
+        && data.businessStatus in ['OPERATIONAL', 'CLOSED_TEMPORARILY', 'UNKNOWN']
+        && data.location is map && data.location.keys().hasAll(['lat', 'lng']) && data.location.keys().hasOnly(['lat', 'lng'])
+        && data.location.lat is number && data.location.lng is number
+        && data.websiteTier in ['A', 'B', 'C', 'D', 'E']
+        && data.score is map
+        && data.score.keys().hasAll(['businessQuality', 'websiteOpportunity', 'onlinePresence', 'customerActivity', 'contactAvailability', 'businessPotential', 'total', 'classification', 'reasons'])
+        && data.score.total is number && data.score.total >= 0 && data.score.total <= 100
+        && data.score.classification in ['Premium Lead', 'High Quality', 'Medium', 'Reject']
+        && data.score.reasons is list && data.score.reasons.size() <= 15
+        && (data.score.reasons.size() == 0 || data.score.reasons[0] is string)
+        && data.stage in ['New Lead', 'Contacted', 'Interested', 'Requirements Discussion', 'Negotiation', 'Ready for Project', 'Not Interested']
+        && data.verified is bool
+        && data.optedOut is bool
+        && data.isDemo is bool
+        && isNonEmptyString(data.discoveredAt, 64)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /leads/{leadId} {
+      allow get: if isValidId(leadId) && isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow create: if isValidId(leadId)
+        && isVerifiedUser()
+        && isValidLead(incoming(), leadId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(leadId)
+        && isVerifiedUser()
+        && (existing().ownerId == request.auth.uid || isAdmin())
+        && isValidLead(incoming(), leadId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            existing().stage != 'Not Interested' &&
+            (
+              incoming().diff(existing()).affectedKeys().hasOnly(['stage', 'verified', 'updatedAt']) ||
+              incoming().diff(existing()).affectedKeys().hasOnly(['websiteTier', 'score', 'verified', 'updatedAt']) ||
+              incoming().diff(existing()).affectedKeys().hasOnly(['email', 'phone', 'contactPerson', 'verified', 'updatedAt']) ||
+              incoming().diff(existing()).affectedKeys().hasOnly(['optedOut', 'stage', 'updatedAt'])
+            )
+          )
+        );
+      allow delete: if isValidId(leadId) && isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // 4. website_audits
+    function isValidWebsiteAudit(data, auditId) {
+      return data.keys().hasAll(['id', 'ownerId', 'businessId', 'tier', 'metrics', 'findings', 'opportunities', 'auditedAt', 'isDemo', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerId', 'businessId', 'websiteUrl', 'tier', 'metrics', 'findings', 'opportunities', 'auditedAt', 'isDemo', 'createdAt', 'updatedAt'])
+        && data.id == auditId
+        && isValidId(data.id)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.businessId)
+        && (!('websiteUrl' in data) || isOptionalString(data.websiteUrl, 500))
+        && data.tier in ['A', 'B', 'C', 'D', 'E']
+        && data.metrics is map
+        && data.metrics.overallQuality is number && data.metrics.overallQuality >= 0 && data.metrics.overallQuality <= 10
+        && data.findings is list && data.findings.size() <= 20
+        && (data.findings.size() == 0 || data.findings[0] is string)
+        && data.opportunities is list && data.opportunities.size() <= 20
+        && (data.opportunities.size() == 0 || data.opportunities[0] is string)
+        && isNonEmptyString(data.auditedAt, 64)
+        && data.isDemo is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /website_audits/{auditId} {
+      allow get: if isValidId(auditId) && isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow create: if isValidId(auditId)
+        && isVerifiedUser()
+        && isValidWebsiteAudit(incoming(), auditId)
+        && exists(/databases/$(database)/documents/leads/$(incoming().businessId))
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(auditId)
+        && isVerifiedUser()
+        && (existing().ownerId == request.auth.uid || isAdmin())
+        && isValidWebsiteAudit(incoming(), auditId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().businessId == existing().businessId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['tier', 'metrics', 'findings', 'opportunities', 'auditedAt', 'updatedAt']);
+      allow delete: if isValidId(auditId) && isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // 5. outreach_messages
+    function isValidOutreachMessage(data, msgId) {
+      return data.keys().hasAll(['id', 'ownerId', 'leadId', 'businessName', 'subject', 'body', 'status', 'channel', 'followUpCount', 'isDemo', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerId', 'leadId', 'businessName', 'recipientEmail', 'subject', 'body', 'status', 'channel', 'followUpCount', 'sentAt', 'gmailMessageId', 'gmailThreadId', 'isDemo', 'createdAt', 'updatedAt'])
+        && data.id == msgId
+        && isValidId(data.id)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.leadId)
+        && isNonEmptyString(data.businessName, 200)
+        && (!('recipientEmail' in data) || isOptionalString(data.recipientEmail, 200))
+        && isNonEmptyString(data.subject, 300)
+        && isNonEmptyString(data.body, 10000)
+        && data.status in ['draft', 'sent', 'replied', 'bounced', 'unsubscribed']
+        && data.channel in ['gmail', 'demo_simulated']
+        && data.followUpCount is number && data.followUpCount >= 0 && data.followUpCount <= 10
+        && (!('sentAt' in data) || isOptionalString(data.sentAt, 64))
+        && (!('gmailMessageId' in data) || isOptionalString(data.gmailMessageId, 200))
+        && (!('gmailThreadId' in data) || isOptionalString(data.gmailThreadId, 200))
+        && data.isDemo is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /outreach_messages/{messageId} {
+      allow get: if isValidId(messageId) && isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow create: if isValidId(messageId)
+        && isVerifiedUser()
+        && isValidOutreachMessage(incoming(), messageId)
+        && exists(/databases/$(database)/documents/leads/$(incoming().leadId))
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(messageId)
+        && isVerifiedUser()
+        && (existing().ownerId == request.auth.uid || isAdmin())
+        && isValidOutreachMessage(incoming(), messageId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().leadId == existing().leadId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['subject', 'body', 'status', 'followUpCount', 'sentAt', 'gmailMessageId', 'gmailThreadId', 'updatedAt']);
+      allow delete: if isValidId(messageId) && isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // 6. conversations
+    function isValidConversation(data, convId) {
+      return data.keys().hasAll(['id', 'ownerId', 'leadId', 'businessName', 'country', 'category', 'stage', 'requestedFeatures', 'readinessConfidence', 'messages', 'isDemo', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'ownerId', 'leadId', 'businessName', 'contactPerson', 'email', 'country', 'category',
+          'stage', 'discussedPrice', 'clientBudget', 'expectedTimeline', 'requestedFeatures',
+          'readinessConfidence', 'readinessTriggerPhrase', 'messages', 'isDemo', 'createdAt', 'updatedAt'
+        ])
+        && data.id == convId
+        && isValidId(data.id)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.leadId)
+        && isNonEmptyString(data.businessName, 200)
+        && (!('contactPerson' in data) || isOptionalString(data.contactPerson, 120))
+        && (!('email' in data) || isOptionalString(data.email, 200))
+        && isNonEmptyString(data.country, 80)
+        && isNonEmptyString(data.category, 120)
+        && data.stage in ['New Lead', 'Contacted', 'Interested', 'Requirements Discussion', 'Negotiation', 'Ready for Project', 'Not Interested']
+        && (!('discussedPrice' in data) || isOptionalString(data.discussedPrice, 100))
+        && (!('clientBudget' in data) || isOptionalString(data.clientBudget, 100))
+        && (!('expectedTimeline' in data) || isOptionalString(data.expectedTimeline, 100))
+        && data.requestedFeatures is list && data.requestedFeatures.size() <= 30
+        && (data.requestedFeatures.size() == 0 || data.requestedFeatures[0] is string)
+        && data.readinessConfidence is number && data.readinessConfidence >= 0 && data.readinessConfidence <= 100
+        && (!('readinessTriggerPhrase' in data) || isOptionalString(data.readinessTriggerPhrase, 300))
+        && data.messages is list && data.messages.size() <= 100
+        && (data.messages.size() == 0 || data.messages[0] is map)
+        && data.isDemo is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /conversations/{conversationId} {
+      allow get: if isValidId(conversationId) && isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow create: if isValidId(conversationId)
+        && isVerifiedUser()
+        && isValidConversation(incoming(), conversationId)
+        && exists(/databases/$(database)/documents/leads/$(incoming().leadId))
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(conversationId)
+        && isVerifiedUser()
+        && (existing().ownerId == request.auth.uid || isAdmin())
+        && isValidConversation(incoming(), conversationId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().leadId == existing().leadId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'stage', 'discussedPrice', 'clientBudget', 'expectedTimeline', 'requestedFeatures',
+          'readinessConfidence', 'readinessTriggerPhrase', 'messages', 'updatedAt'
+        ]);
+      allow delete: if isValidId(conversationId) && isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // 7. projects (terminal state lock once taken_over unless admin)
+    function isValidReadyProject(data, projectId) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'leadId', 'conversationId', 'businessName', 'contactPerson', 'email',
+          'country', 'category', 'projectRequirements', 'requestedFeatures', 'clientBudget',
+          'discussedPrice', 'expectedTimeline', 'conversationHistory', 'status', 'isDemo', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerId', 'leadId', 'conversationId', 'businessName', 'contactPerson', 'email',
+          'clientPhone', 'country', 'category', 'projectRequirements', 'requestedFeatures', 'clientBudget',
+          'discussedPrice', 'expectedTimeline', 'conversationHistory', 'status', 'takenOverBy',
+          'takenOverAt', 'isDemo', 'createdAt', 'updatedAt'
+        ])
+        && data.id == projectId
+        && isValidId(data.id)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.leadId)
+        && isValidId(data.conversationId)
+        && isNonEmptyString(data.businessName, 200)
+        && isNonEmptyString(data.contactPerson, 120)
+        && isNonEmptyString(data.email, 200)
+        && (!('clientPhone' in data) || isOptionalString(data.clientPhone, 60))
+        && isNonEmptyString(data.country, 80)
+        && isNonEmptyString(data.category, 120)
+        && isNonEmptyString(data.projectRequirements, 5000)
+        && data.requestedFeatures is list && data.requestedFeatures.size() <= 30
+        && (data.requestedFeatures.size() == 0 || data.requestedFeatures[0] is string)
+        && isNonEmptyString(data.clientBudget, 100)
+        && isNonEmptyString(data.discussedPrice, 100)
+        && isNonEmptyString(data.expectedTimeline, 100)
+        && data.conversationHistory is list && data.conversationHistory.size() <= 100
+        && (data.conversationHistory.size() == 0 || data.conversationHistory[0] is map)
+        && data.status in ['pending_takeover', 'taken_over']
+        && (!('takenOverBy' in data) || isOptionalString(data.takenOverBy, 120))
+        && (!('takenOverAt' in data) || isOptionalString(data.takenOverAt, 64))
+        && data.isDemo is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /projects/{projectId} {
+      allow get: if isValidId(projectId) && isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow create: if isValidId(projectId)
+        && isVerifiedUser()
+        && isValidReadyProject(incoming(), projectId)
+        && exists(/databases/$(database)/documents/leads/$(incoming().leadId))
+        && incoming().status == 'pending_takeover'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(projectId)
+        && isVerifiedUser()
+        && (existing().ownerId == request.auth.uid || isAdmin())
+        && isValidReadyProject(incoming(), projectId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().leadId == existing().leadId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            existing().status == 'pending_takeover' &&
+            incoming().status == 'taken_over' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'takenOverBy', 'takenOverAt', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidId(projectId) && isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // 8. settings (strictly owner-isolated)
+    function isValidSettings(data, settingId) {
+      return data.keys().hasAll(['ownerId', 'ownerName', 'businessName', 'contactEmail', 'portfolioUrl', 'targetCountries', 'targetCategories', 'aiPersonality', 'maxDiscountPercent', 'paymentMilestones', 'defaultDeliveryTimeline', 'regionalPricing', 'packages', 'automation', 'notifications', 'optOutEmails', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'ownerName', 'businessName', 'contactEmail', 'portfolioUrl', 'targetCountries', 'targetCategories', 'aiPersonality', 'maxDiscountPercent', 'paymentMilestones', 'defaultDeliveryTimeline', 'regionalPricing', 'packages', 'automation', 'notifications', 'optOutEmails', 'createdAt', 'updatedAt'])
+        && data.ownerId == request.auth.uid
+        && settingId == request.auth.uid
+        && isNonEmptyString(data.ownerName, 120)
+        && isNonEmptyString(data.businessName, 120)
+        && isNonEmptyString(data.contactEmail, 200)
+        && isOptionalString(data.portfolioUrl, 500)
+        && data.targetCountries is list && data.targetCountries.size() <= 10
+        && (data.targetCountries.size() == 0 || data.targetCountries[0] is string)
+        && data.targetCategories is list && data.targetCategories.size() <= 30
+        && (data.targetCategories.size() == 0 || data.targetCategories[0] is string)
+        && data.aiPersonality in ['Consultative & Crisp', 'Executive & Direct', 'Warm & Helpful']
+        && data.maxDiscountPercent is number && data.maxDiscountPercent >= 0 && data.maxDiscountPercent <= 50
+        && isNonEmptyString(data.paymentMilestones, 300)
+        && isNonEmptyString(data.defaultDeliveryTimeline, 200)
+        && data.regionalPricing is list && data.regionalPricing.size() <= 10
+        && (data.regionalPricing.size() == 0 || data.regionalPricing[0] is map)
+        && data.packages is list && data.packages.size() <= 10
+        && (data.packages.size() == 0 || data.packages[0] is map)
+        && data.automation is map
+        && data.notifications is map
+        && data.optOutEmails is list && data.optOutEmails.size() <= 500
+        && (data.optOutEmails.size() == 0 || data.optOutEmails[0] is string)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /settings/{settingId} {
+      allow get: if isValidId(settingId) && (isOwnerUid(settingId) || isAdmin());
+      allow list: if isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow create: if isValidId(settingId)
+        && isOwnerUid(settingId)
+        && isValidSettings(incoming(), settingId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(settingId)
+        && isOwnerUid(settingId)
+        && isValidSettings(incoming(), settingId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'ownerName', 'businessName', 'contactEmail', 'portfolioUrl', 'targetCountries',
+          'targetCategories', 'aiPersonality', 'maxDiscountPercent', 'paymentMilestones',
+          'defaultDeliveryTimeline', 'regionalPricing', 'packages', 'automation',
+          'notifications', 'optOutEmails', 'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+
+    // 9. activity_logs (append-only for owner)
+    function isValidActivityLog(data, logId) {
+      return data.keys().hasAll(['id', 'ownerId', 'type', 'title', 'detail', 'timestamp', 'isDemo', 'createdAt'])
+        && data.keys().hasOnly(['id', 'ownerId', 'type', 'title', 'detail', 'timestamp', 'isDemo', 'createdAt'])
+        && data.id == logId
+        && isValidId(data.id)
+        && data.ownerId == request.auth.uid
+        && data.type in ['discovery', 'audit', 'score', 'outreach', 'conversation', 'handover', 'automation', 'settings']
+        && isNonEmptyString(data.title, 300)
+        && isOptionalString(data.detail, 2000)
+        && isNonEmptyString(data.timestamp, 64)
+        && data.isDemo is bool
+        && data.createdAt is timestamp;
+    }
+
+    match /activity_logs/{logId} {
+      allow get: if isValidId(logId) && isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow create: if isValidId(logId)
+        && isVerifiedUser()
+        && isValidActivityLog(incoming(), logId)
+        && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(logId) && isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "AK47 Client Hunter AI",
+  "description": "Autonomous AI-powered client acquisition platform for website development agencies — Google Maps lead discovery, website quality auditing, AI lead scoring, Gmail outreach, conversational negotiation, and project handover.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
